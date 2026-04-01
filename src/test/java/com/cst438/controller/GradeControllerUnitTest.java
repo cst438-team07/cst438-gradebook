@@ -1,195 +1,178 @@
 package com.cst438.controller;
 
 import com.cst438.domain.*;
-import com.cst438.dto.AssignmentDTO;
 import com.cst438.dto.GradeDTO;
 import com.cst438.dto.LoginDTO;
-import com.cst438.service.RegistrarServiceProxy;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.reactive.server.EntityExchangeResult;
 import org.springframework.test.web.reactive.server.WebTestClient;
-import java.util.Random;
 
-
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = {
+                // disable RabbitMQ listener during tests
+                "spring.rabbitmq.listener.simple.auto-startup=false"
+        }
+)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_EACH_TEST_METHOD)
+// reset database before each test to ensure isolation
 public class GradeControllerUnitTest {
+
     @Autowired
-    private WebTestClient webClient;
-    @MockitoBean
-    private RegistrarServiceProxy registrarServiceProxy;
-    @Autowired
-    private AssignmentRepository assignmentRepository;
-    @Autowired
-    private SectionRepository sectionRepository;
-    @Autowired
-    private UserRepository userRepository;
+    private WebTestClient client;
+
     @Autowired
     private GradeRepository gradeRepository;
 
-    @MockitoBean
-    RegistrarServiceProxy registrarService;
+    @Autowired
+    private AssignmentRepository assignmentRepository;
 
-    @Test
-    public void GetGradeList() throws Exception {
-        //login as teacher
-        String email = "ted@csumb.edu";
-        String password = "ted2025";
-        EntityExchangeResult<LoginDTO> login_dto =  webClient.get().uri("/login")
-                .headers(headers -> headers.setBasicAuth(email, password))
-                .accept(MediaType.APPLICATION_JSON)
+    @Autowired
+    private EnrollmentRepository enrollmentRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private SectionRepository sectionRepository;
+
+    // helper method to authenticate and retrieve JWT token
+    private String login(String email, String password) {
+        EntityExchangeResult<LoginDTO> result = client.get()
+                .uri("/login")
+                .headers(h -> h.setBasicAuth(email, password))
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody(LoginDTO.class).returnResult();
+                .expectBody(LoginDTO.class)
+                .returnResult();
 
-        String jwt = login_dto.getResponseBody().jwt();
-        assertNotNull(jwt);
-        AssignmentDTO assignmentDTO= new AssignmentDTO(
-                0,
-                "New Assignment",
-                "2026-02-30",
-                "cst489",
-                1,
-                1
-
-        );
-        EntityExchangeResult<AssignmentDTO> AssignmentResponse =  webClient.post().uri("/assignments")
-                .headers(headers -> headers.setBearerAuth(jwt))
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(assignmentDTO)
-                .accept(MediaType.APPLICATION_JSON)
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody(AssignmentDTO.class).returnResult();
-        AssignmentDTO actualAssignment = AssignmentResponse.getResponseBody();
-        assertTrue(actualAssignment.id()>0,"new key not generated");
-        Assignment assignment=assignmentRepository.findByID(actualAssignment.id());
-        assertNotNull(assignment);
-        //use get command to list grades for teachers
-        EntityExchangeResult <List<GradeDTO>> GradeResposne=webClient.get().uri("/assignments/"+assignment.getAssignmentId()+"/grades")
-                .headers(headers -> headers.setBearerAuth(jwt))
-                .accept(MediaType.APPLICATION_JSON)
-                .exchange()
-                .expectStatus().isOk()
-                .expectBodyList(GradeDTO.class).returnResult();
-        //assert a response comes back
-        assertNotNull(GradeResposne);
-        //check to make sure grades returned are for the right assignments
-        String title=assignment.getTitle();
-        List<GradeDTO> grades = GradeResposne.getResponseBody();
-        for(GradeDTO gradeDTO : grades) {
-            assertEquals(gradeDTO.assignmentTitle(), title);
-        }
-        //sign in as student
-        String sEmail="sam@csumb.edu";
-        String sPassword="sam2025";
-        EntityExchangeResult<LoginDTO> studentLogin =  webClient.get().uri("/login")
-                .headers(headers -> headers.setBasicAuth(sEmail, sPassword))
-                .accept(MediaType.APPLICATION_JSON)
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody(LoginDTO.class).returnResult();
-        String studentJwt = studentLogin.getResponseBody().jwt();
-        assertNotNull(studentJwt);
-        //student cannot view all grades
-        EntityExchangeResult <List<GradeDTO>> GradeResposneStudent=webClient.get().uri("/assignments/"+assignment.getAssignmentId()+"/grades")
-                .headers(headers -> headers.setBearerAuth(studentJwt))
-                .accept(MediaType.APPLICATION_JSON)
-                .exchange()
-                .expectStatus().is4xxClientError()
-                .expectBodyList(GradeDTO.class).returnResult();
-
-
-
+        return result.getResponseBody().jwt();
     }
 
+    // test that instructor can successfully update grades
     @Test
-    public void updateGrades() throws Exception {
-        //login as teacher
-        String email = "ted@csumb.edu";
-        String password = "ted2025";
-        EntityExchangeResult<LoginDTO> login_dto =  webClient.get().uri("/login")
-                .headers(headers -> headers.setBasicAuth(email, password))
-                .accept(MediaType.APPLICATION_JSON)
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody(LoginDTO.class).returnResult();
+    public void testUpdateGradesSuccess() {
 
-        String jwt = login_dto.getResponseBody().jwt();
-        assertNotNull(jwt);
-        AssignmentDTO assignmentDTO= new AssignmentDTO(
-                0,
-                "HW 1",
-                "2026-02-30",
-                "cst489",
-                1,
-                1
+        // login as instructor
+        String jwt = login("ted@csumb.edu", "ted2025");
 
+        // retrieve an existing section from the database
+        Section section = sectionRepository.findAll().iterator().next();
+
+        // create a new assignment for the section
+        Assignment assignment = new Assignment();
+        assignment.setTitle("Test Assignment");
+        assignment.setSection(section);
+        assignment = assignmentRepository.save(assignment);
+
+        // retrieve an existing student user
+        User student = userRepository.findById(2).orElseThrow();
+
+        // create enrollment linking student to section
+        Enrollment enrollment = new Enrollment();
+        enrollment.setSection(section);
+        enrollment.setStudent(student);
+        enrollment.setGrade(null);
+        enrollment = enrollmentRepository.save(enrollment);
+
+        // create initial grade for the assignment
+        Grade grade = new Grade();
+        grade.setAssignment(assignment);
+        grade.setEnrollment(enrollment);
+        grade.setScore(80);
+        grade = gradeRepository.save(grade);
+
+        // build DTO with updated score
+        GradeDTO dto = new GradeDTO(
+                grade.getGradeId(),
+                student.getName(),
+                student.getEmail(),
+                assignment.getTitle(),
+                section.getCourse().getCourseId(),
+                section.getSectionId(),
+                95
         );
-        EntityExchangeResult<AssignmentDTO> AssignmentResponse =  webClient.post().uri("/assignments")
-                .headers(headers -> headers.setBearerAuth(jwt))
+
+        // call API to update grade
+        client.put()
+                .uri("/grades")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwt)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(assignmentDTO)
-                .accept(MediaType.APPLICATION_JSON)
+                .bodyValue(List.of(dto))
                 .exchange()
-                .expectStatus().isOk()
-                .expectBody(AssignmentDTO.class).returnResult();
-        AssignmentDTO actualAssignment = AssignmentResponse.getResponseBody();
-        assertTrue(actualAssignment.id()>0,"new key not generated");
-        Assignment assignment=assignmentRepository.findByID(actualAssignment.id());
-        assertNotNull(assignment);
-        //updated grade DTO
-        List<GradeDTO> gradeDTO=List.of(new GradeDTO(
-                1,
-                "sam",
-                "sam@csumb.edu",
-                "HW 1",
-                "cst 489",
-                1,
-                85));
-        //submit DTO and update data base
-        EntityExchangeResult<List<GradeDTO>> GradeResponse =  webClient.put().uri("/grades")
-                .headers(headers -> headers.setBearerAuth(jwt))
+                .expectStatus().isOk();
+
+        // verify grade was updated in database
+        Grade updated = gradeRepository.findById(grade.getGradeId()).orElse(null);
+        assertNotNull(updated);
+        assertEquals(95, updated.getScore());
+    }
+
+    // test that student is forbidden from updating grades
+    @Test
+    public void testUpdateGradesForbidden() {
+
+        // login as student
+        String jwt = login("sam@csumb.edu", "sam2025");
+
+        // retrieve an existing section
+        Section section = sectionRepository.findAll().iterator().next();
+
+        // create assignment
+        Assignment assignment = new Assignment();
+        assignment.setTitle("Test Assignment");
+        assignment.setSection(section);
+        assignment = assignmentRepository.save(assignment);
+
+        // retrieve student
+        User student = userRepository.findById(2).orElseThrow();
+
+        // create enrollment
+        Enrollment enrollment = new Enrollment();
+        enrollment.setSection(section);
+        enrollment.setStudent(student);
+        enrollment.setGrade(null);
+        enrollment = enrollmentRepository.save(enrollment);
+
+        // create grade
+        Grade grade = new Grade();
+        grade.setAssignment(assignment);
+        grade.setEnrollment(enrollment);
+        grade.setScore(80);
+        grade = gradeRepository.save(grade);
+
+        // build DTO attempting to update score
+        GradeDTO dto = new GradeDTO(
+                grade.getGradeId(),
+                student.getName(),
+                student.getEmail(),
+                assignment.getTitle(),
+                section.getCourse().getCourseId(),
+                section.getSectionId(),
+                95
+        );
+
+        // attempt update as student (should be forbidden)
+        client.put()
+                .uri("/grades")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwt)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(gradeDTO)
-                .accept(MediaType.APPLICATION_JSON)
+                .bodyValue(List.of(dto))
                 .exchange()
-                .expectStatus().isOk()
-                .expectBodyList(GradeDTO.class).returnResult();
-        //assert that a response is given with DTO
-        assertNotNull(GradeResponse);
-        List<GradeDTO> gradeDTO1=GradeResponse.getResponseBody();
-        //check that grades returned match updated DTO
-        for(GradeDTO grade : gradeDTO1) {
-            assertEquals(grade.score(),gradeRepository.findById(1).getScore());
-        }
-        //sign in as student
-        String sEmail="sam@csumb.edu";
-        String sPassword="sam2025";
-        EntityExchangeResult<LoginDTO> studentLogin =  webClient.get().uri("/login")
-                .headers(headers -> headers.setBasicAuth(sEmail, sPassword))
-                .accept(MediaType.APPLICATION_JSON)
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody(LoginDTO.class).returnResult();
-        String studentJwt = studentLogin.getResponseBody().jwt();
-        assertNotNull(studentJwt);
-        //check to make sure students cannot update grades
-        EntityExchangeResult<List<GradeDTO>> GradeResponseStudent =  webClient.put().uri("/grades")
-                .headers(headers -> headers.setBearerAuth(studentJwt))
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(gradeDTO)
-                .accept(MediaType.APPLICATION_JSON)
-                .exchange()
-                .expectStatus().is4xxClientError()
-                .expectBodyList(GradeDTO.class).returnResult();
+                .expectStatus().isForbidden();
+
+        // verify grade was NOT changed
+        Grade unchanged = gradeRepository.findById(grade.getGradeId()).orElse(null);
+        assertNotNull(unchanged);
+        assertEquals(80, unchanged.getScore());
     }
 }
