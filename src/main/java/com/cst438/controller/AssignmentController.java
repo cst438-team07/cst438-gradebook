@@ -34,7 +34,7 @@ public class AssignmentController {
         this.userRepository = userRepository;
     }
 
-    // return sections for instructor for a given term
+    //  get sections for instructor
     @GetMapping("/sections")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public List<SectionDTO> getSectionsForInstructor(
@@ -62,15 +62,14 @@ public class AssignmentController {
                 )).toList();
     }
 
-    // return assignments for a section
+    //  get assignments for section
     @GetMapping("/sections/{secNo}/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public List<AssignmentDTO> getAssignments(
             @PathVariable("secNo") int secNo,
             Principal principal) {
 
-        Section section =
-                sectionRepository.findByEmailandSectionNo(principal.getName(), secNo);
+        Section section = sectionRepository.findById(secNo).orElse(null);
 
         if (section == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);
@@ -91,15 +90,14 @@ public class AssignmentController {
                 )).toList();
     }
 
-    // create assignment
+    //  create assignment
     @PostMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public AssignmentDTO createAssignment(
             @Valid @RequestBody AssignmentDTO dto,
             Principal principal) {
 
-        Section s =
-                sectionRepository.findByEmailandSectionNo(principal.getName(), dto.secNo());
+        Section s = sectionRepository.findById(dto.secNo()).orElse(null);
 
         if (s == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
@@ -109,15 +107,16 @@ public class AssignmentController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
 
-        // check due date is within term
-        if (Date.valueOf(dto.dueDate()).compareTo(s.getTerm().getAddDate()) < 0 ||
-                Date.valueOf(dto.dueDate()).compareTo(s.getTerm().getEndDate()) > 0) {
+        Date dueDate = Date.valueOf(dto.dueDate());
+
+        if (dueDate.before(s.getTerm().getAddDate()) ||
+                dueDate.after(s.getTerm().getEndDate())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
         }
 
         Assignment assignment = new Assignment();
         assignment.setTitle(dto.title());
-        assignment.setDueDate(Date.valueOf(dto.dueDate()));
+        assignment.setDueDate(dueDate);
         assignment.setSection(s);
 
         assignmentRepository.save(assignment);
@@ -132,7 +131,7 @@ public class AssignmentController {
         );
     }
 
-    // update assignment title or due date
+    //  update assignment
     @PutMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public AssignmentDTO updateAssignment(
@@ -156,9 +155,11 @@ public class AssignmentController {
         }
 
         if (dto.dueDate() != null) {
-            if ((0 >= Date.valueOf(dto.dueDate()).compareTo(s.getTerm().getEndDate())) &&
-                    0 <= Date.valueOf(dto.dueDate()).compareTo(s.getTerm().getStartDate())) {
-                assignment.setDueDate(Date.valueOf(dto.dueDate()));
+            Date newDate = Date.valueOf(dto.dueDate());
+
+            if (!newDate.before(s.getTerm().getStartDate()) &&
+                    !newDate.after(s.getTerm().getEndDate())) {
+                assignment.setDueDate(newDate);
             } else {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
             }
@@ -176,7 +177,7 @@ public class AssignmentController {
         );
     }
 
-    // delete assignment
+    //  delete assignment
     @DeleteMapping("/assignments/{assignmentId}")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public void deleteAssignment(
@@ -198,7 +199,7 @@ public class AssignmentController {
         assignmentRepository.delete(assignment);
     }
 
-    // student view assignments and grades
+    //  student view
     @GetMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_STUDENT')")
     public List<AssignmentStudentDTO> getStudentAssignments(
@@ -220,10 +221,7 @@ public class AssignmentController {
                             assignment.getAssignmentId()
                     );
 
-            Integer score = null;
-            if (g != null) {
-                score = g.getScore();
-            }
+            Integer score = (g != null) ? g.getScore() : null;
 
             return new AssignmentStudentDTO(
                     assignment.getAssignmentId(),
