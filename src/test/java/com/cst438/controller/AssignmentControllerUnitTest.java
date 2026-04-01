@@ -168,7 +168,7 @@ public class AssignmentControllerUnitTest {
         Assignment testAssignment = assignmentRepository.findByID(actualAssignment.id());
         assertEquals("Updated Assignment", testAssignment.getTitle());
 
-        // ✅ FIXED DELETE
+        // FIXED DELETE
         webClient.delete().uri("/assignments/" + actualAssignment.id())
                 .headers(headers -> headers.setBearerAuth(jwt))
                 .exchange()
@@ -194,7 +194,7 @@ public class AssignmentControllerUnitTest {
         String jwt = login_dto.getResponseBody().jwt();
         assertNotNull(jwt);
 
-        // ✅ FIXED TERM
+        // FIXED TERM
         EntityExchangeResult<List<SectionDTO>> Sections = webClient.get()
                 .uri("/sections?year=2026&semester=Spring")
                 .headers(headers -> headers.setBearerAuth(jwt))
