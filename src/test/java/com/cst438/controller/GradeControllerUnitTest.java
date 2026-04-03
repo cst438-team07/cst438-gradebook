@@ -19,12 +19,12 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                // disable RabbitMQ listener during tests
+                // disable RabbitMQ listener during tests so tests run independently
                 "spring.rabbitmq.listener.simple.auto-startup=false"
         }
 )
 @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_EACH_TEST_METHOD)
-// reset database before each test to ensure isolation
+// reset database before each test for isolation and repeatability
 public class GradeControllerUnitTest {
 
     @Autowired
@@ -45,7 +45,10 @@ public class GradeControllerUnitTest {
     @Autowired
     private SectionRepository sectionRepository;
 
-    // helper method to authenticate and retrieve JWT token
+    /**
+     * Helper method to authenticate a user and retrieve a JWT token.
+     * This simulates login and is required for secured endpoints.
+     */
     private String login(String email, String password) {
         EntityExchangeResult<LoginDTO> result = client.get()
                 .uri("/login")
@@ -58,23 +61,33 @@ public class GradeControllerUnitTest {
         return result.getResponseBody().jwt();
     }
 
-    // test that instructor can successfully update grades
+    /**
+     * Test verifies full workflow for updating grades:
+     * 1. GET grades before update
+     * 2. PUT update request
+     * 3. Validate database update
+     * 4. GET grades after update
+     */
     @Test
     public void testUpdateGradesSuccess() {
 
-        // login as instructor
+        // login as instructor to obtain valid JWT token
         String jwt = login("ted@csumb.edu", "ted2025");
 
-        // retrieve an existing section from the database
+        // retrieve an existing section from database
         Section section = sectionRepository.findAll().iterator().next();
 
-        // create a new assignment for the section
+        // ensure instructor matches logged-in user (required for authorization check)
+        section.setInstructorEmail("ted@csumb.edu");
+        sectionRepository.save(section);
+
+        // create assignment linked to section
         Assignment assignment = new Assignment();
         assignment.setTitle("Test Assignment");
         assignment.setSection(section);
         assignment = assignmentRepository.save(assignment);
 
-        // retrieve an existing student user
+        // retrieve student user
         User student = userRepository.findById(2).orElseThrow();
 
         // create enrollment linking student to section
@@ -84,14 +97,33 @@ public class GradeControllerUnitTest {
         enrollment.setGrade(null);
         enrollment = enrollmentRepository.save(enrollment);
 
-        // create initial grade for the assignment
+        // create initial grade with score = 80
         Grade grade = new Grade();
         grade.setAssignment(assignment);
         grade.setEnrollment(enrollment);
         grade.setScore(80);
         grade = gradeRepository.save(grade);
 
-        // build DTO with updated score
+        // -------------------------------
+        // GET BEFORE UPDATE
+        // -------------------------------
+        // Calls GET endpoint to verify initial grade is returned correctly
+        client.get()
+                .uri("/assignments/{assignmentId}/grades", assignment.getAssignmentId())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwt)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBodyList(GradeDTO.class)
+                .consumeWith(result -> {
+                    List<GradeDTO> grades = result.getResponseBody();
+                    assertNotNull(grades);
+                    assertFalse(grades.isEmpty());
+
+                    // verify initial score is 80
+                    assertEquals(80, grades.get(0).score());
+                });
+
+        // build DTO with updated score = 95
         GradeDTO dto = new GradeDTO(
                 grade.getGradeId(),
                 student.getName(),
@@ -102,7 +134,10 @@ public class GradeControllerUnitTest {
                 95
         );
 
-        // call API to update grade
+        // -------------------------------
+        // PUT UPDATE
+        // -------------------------------
+        // Calls PUT endpoint to update grade score
         client.put()
                 .uri("/grades")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwt)
@@ -111,20 +146,45 @@ public class GradeControllerUnitTest {
                 .exchange()
                 .expectStatus().isOk();
 
-        // verify grade was updated in database
+        // -------------------------------
+        // DATABASE VALIDATION
+        // -------------------------------
+        // Verify that grade was updated in database
         Grade updated = gradeRepository.findById(grade.getGradeId()).orElse(null);
         assertNotNull(updated);
         assertEquals(95, updated.getScore());
+
+        // -------------------------------
+        // GET AFTER UPDATE
+        // -------------------------------
+        // Calls GET endpoint again to verify updated value is returned
+        client.get()
+                .uri("/assignments/{assignmentId}/grades", assignment.getAssignmentId())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwt)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBodyList(GradeDTO.class)
+                .consumeWith(result -> {
+                    List<GradeDTO> grades = result.getResponseBody();
+                    assertNotNull(grades);
+                    assertFalse(grades.isEmpty());
+
+                    // verify updated score is 95
+                    assertEquals(95, grades.get(0).score());
+                });
     }
 
-    // test that student is forbidden from updating grades
+    /**
+     * Test verifies that a student (non-instructor) is forbidden
+     * from updating grades.
+     */
     @Test
     public void testUpdateGradesForbidden() {
 
         // login as student
         String jwt = login("sam@csumb.edu", "sam2025");
 
-        // retrieve an existing section
+        // retrieve section
         Section section = sectionRepository.findAll().iterator().next();
 
         // create assignment
@@ -161,7 +221,7 @@ public class GradeControllerUnitTest {
                 95
         );
 
-        // attempt update as student (should be forbidden)
+        // attempt update as student (should fail with 403 Forbidden)
         client.put()
                 .uri("/grades")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwt)
@@ -170,7 +230,7 @@ public class GradeControllerUnitTest {
                 .exchange()
                 .expectStatus().isForbidden();
 
-        // verify grade was NOT changed
+        // verify grade was NOT changed in database
         Grade unchanged = gradeRepository.findById(grade.getGradeId()).orElse(null);
         assertNotNull(unchanged);
         assertEquals(80, unchanged.getScore());
