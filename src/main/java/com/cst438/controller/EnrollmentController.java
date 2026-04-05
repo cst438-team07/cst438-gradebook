@@ -125,6 +125,7 @@ public class EnrollmentController {
             // send message to Registrar service for grade update
             enrollment.setGrade(dto.grade());
             enrollmentRepository.save(enrollment);
+            registrar.sendMessage("updateEnrollment", dto);
         }
 
     }
