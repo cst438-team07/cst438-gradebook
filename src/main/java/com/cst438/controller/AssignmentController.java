@@ -8,10 +8,16 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+
 
 import java.security.Principal;
 import java.sql.Date;
+import java.util.ArrayList;
 import java.util.List;
 
 @RestController
@@ -34,172 +40,64 @@ public class AssignmentController {
         this.userRepository = userRepository;
     }
 
-    //  get sections for instructor
+    // get Sections for an instructor
     @GetMapping("/sections")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public List<SectionDTO> getSectionsForInstructor(
-            @RequestParam("year") int year,
+            @RequestParam("year") int year ,
             @RequestParam("semester") String semester,
-            Principal principal) {
-
-        List<Section> sections =
-                sectionRepository.findByInstructorEmailAndYearAndSemester(
-                        principal.getName(), year, semester);
-
-        return sections.stream().map(section ->
-                new SectionDTO(
-                        section.getSectionNo(),
-                        section.getTerm().getYear(),
-                        section.getTerm().getSemester(),
-                        section.getCourse().getCourseId(),
-                        section.getCourse().getTitle(),
-                        section.getSectionId(),
-                        section.getBuilding(),
-                        section.getRoom(),
-                        section.getTimes(),
-                        userRepository.findByEmail(section.getInstructorEmail()).getName(),
-                        section.getInstructorEmail()
-                )).toList();
+            Principal principal)  {
+        // return the Sections that have instructorEmail for the
+        // logged in instructor user for the given term.
+        return null;
     }
 
-    //  get assignments for section
+    // instructor lists assignments for a section.
     @GetMapping("/sections/{secNo}/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public List<AssignmentDTO> getAssignments(
             @PathVariable("secNo") int secNo,
             Principal principal) {
 
-        Section section = sectionRepository.findById(secNo).orElse(null);
-
-        if (section == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-
-        if (!section.getInstructorEmail().equals(principal.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-
-        return section.getAssignments().stream().map(assignment ->
-                new AssignmentDTO(
-                        assignment.getAssignmentId(),
-                        assignment.getTitle(),
-                        assignment.getDueDate().toString(),
-                        assignment.getSection().getCourse().getCourseId(),
-                        assignment.getSection().getSectionId(),
-                        assignment.getSection().getSectionNo()
-                )).toList();
+        // verify that user is the instructor for the section
+        //  return list of assignments for the Section
+        return null;
     }
 
-    //  create assignment
+
     @PostMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public AssignmentDTO createAssignment(
             @Valid @RequestBody AssignmentDTO dto,
             Principal principal) {
 
-        Section s = sectionRepository.findById(dto.secNo()).orElse(null);
-
-        if (s == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
-        }
-
-        if (!s.getInstructorEmail().equals(principal.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-
-        Date dueDate = Date.valueOf(dto.dueDate());
-
-        if (dueDate.before(s.getTerm().getAddDate()) ||
-                dueDate.after(s.getTerm().getEndDate())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
-        }
-
-        Assignment assignment = new Assignment();
-        assignment.setTitle(dto.title());
-        assignment.setDueDate(dueDate);
-        assignment.setSection(s);
-
-        assignmentRepository.save(assignment);
-
-        return new AssignmentDTO(
-                assignment.getAssignmentId(),
-                assignment.getTitle(),
-                assignment.getDueDate().toString(),
-                assignment.getSection().getCourse().getCourseId(),
-                assignment.getSection().getSectionId(),
-                assignment.getSection().getSectionNo()
-        );
+        //  user must be the instructor for the Section
+        //  check that assignment dueDate is between start date and
+        //  end date of the term
+        //  create and save an Assignment entity
+        //  return AssignmentDTO with database generated primary key
+        return null;
     }
 
-    //  update assignment
+
     @PutMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
-    public AssignmentDTO updateAssignment(
-            @Valid @RequestBody AssignmentDTO dto,
-            Principal principal) {
-
-        Assignment assignment = assignmentRepository.findByID(dto.id());
-
-        if (assignment == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-
-        Section s = assignment.getSection();
-
-        if (!s.getInstructorEmail().equals(principal.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-
-        if (dto.title() != null) {
-            assignment.setTitle(dto.title());
-        }
-
-        if (dto.dueDate() != null) {
-            Date newDate = Date.valueOf(dto.dueDate());
-
-            if (!newDate.before(s.getTerm().getStartDate()) &&
-                    !newDate.after(s.getTerm().getEndDate())) {
-                assignment.setDueDate(newDate);
-            } else {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
-            }
-        }
-
-        assignmentRepository.save(assignment);
-
-        return new AssignmentDTO(
-                assignment.getAssignmentId(),
-                assignment.getTitle(),
-                assignment.getDueDate().toString(),
-                assignment.getSection().getCourse().getCourseId(),
-                assignment.getSection().getSectionId(),
-                assignment.getSection().getSectionNo()
-        );
+    public AssignmentDTO updateAssignment(@Valid @RequestBody AssignmentDTO dto, Principal principal) {
+        //  update Assignment Entity.  only title and dueDate fields can be changed.
+        //  user must be instructor of the Section
+        return null;
     }
 
-    //  delete assignment
+
     @DeleteMapping("/assignments/{assignmentId}")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
-    public void deleteAssignment(
-            @PathVariable("assignmentId") int assignmentId,
-            Principal principal) {
+    public void deleteAssignment(@PathVariable("assignmentId") int assignmentId, Principal principal) {
+        // verify that user is the instructor of the section
+        // delete the Assignment entity
 
-        Assignment assignment = assignmentRepository.findByID(assignmentId);
-
-        if (assignment == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-
-        Section s = assignment.getSection();
-
-        if (!s.getInstructorEmail().equals(principal.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-
-        assignmentRepository.delete(assignment);
     }
 
-    //  student view
+    // student lists their assignments/grades  ordered by due date
     @GetMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_STUDENT')")
     public List<AssignmentStudentDTO> getStudentAssignments(
@@ -207,30 +105,10 @@ public class AssignmentController {
             @RequestParam("semester") String semester,
             Principal principal) {
 
-        User user = userRepository.findByEmail(principal.getName());
-
-        List<Assignment> assignments =
-                assignmentRepository.findByStudentEmailAndYearAndSemester(
-                        user.getEmail(), year, semester);
-
-        return assignments.stream().map(assignment -> {
-
-            Grade g =
-                    gradeRepository.findByStudentEmailAndAssignmentId(
-                            user.getEmail(),
-                            assignment.getAssignmentId()
-                    );
-
-            Integer score = (g != null) ? g.getScore() : null;
-
-            return new AssignmentStudentDTO(
-                    assignment.getAssignmentId(),
-                    assignment.getTitle(),
-                    assignment.getDueDate(),
-                    assignment.getSection().getCourse().getCourseId(),
-                    assignment.getSection().getSectionId(),
-                    score
-            );
-        }).toList();
+        //  return AssignmentStudentDTOs with scores of a
+        //  Grade entity exists.
+        //  hint: use the GradeRepository findByStudentEmailAndAssignmentId
+        //  If assignment has not been graded, return a null score.
+        return null;
     }
 }
