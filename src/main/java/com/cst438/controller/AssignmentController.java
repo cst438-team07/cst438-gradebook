@@ -22,6 +22,7 @@ public class AssignmentController {
     private final GradeRepository gradeRepository;
     private final UserRepository userRepository;
 
+    // constructor injection for repositories
     public AssignmentController(
             SectionRepository sectionRepository,
             AssignmentRepository assignmentRepository,
@@ -34,7 +35,7 @@ public class AssignmentController {
         this.userRepository = userRepository;
     }
 
-    //  get sections for instructor
+    // get sections for the logged-in instructor for a given term
     @GetMapping("/sections")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public List<SectionDTO> getSectionsForInstructor(
@@ -46,37 +47,37 @@ public class AssignmentController {
                 sectionRepository.findByInstructorEmailAndYearAndSemester(
                         principal.getName(), year, semester);
 
-        return sections.stream().map(section ->
-                new SectionDTO(
-                        section.getSectionNo(),
-                        section.getTerm().getYear(),
-                        section.getTerm().getSemester(),
-                        section.getCourse().getCourseId(),
-                        section.getCourse().getTitle(),
-                        section.getSectionId(),
-                        section.getBuilding(),
-                        section.getRoom(),
-                        section.getTimes(),
-                        userRepository.findByEmail(section.getInstructorEmail()).getName(),
-                        section.getInstructorEmail()
-                )).toList();
+        return sections.stream().map(section -> {
+            User instructor = userRepository.findByEmail(principal.getName());
+
+            return new SectionDTO(
+                    section.getSectionNo(),
+                    section.getTerm().getYear(),
+                    section.getTerm().getSemester(),
+                    section.getCourse().getCourseId(),
+                    section.getCourse().getTitle(),
+                    section.getSectionId(),
+                    section.getBuilding(),
+                    section.getRoom(),
+                    section.getTimes(),
+                    instructor.getName(),
+                    section.getInstructorEmail()
+            );
+        }).toList();
     }
 
-    //  get assignments for section
+    // get all assignments for one instructor section
     @GetMapping("/sections/{secNo}/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public List<AssignmentDTO> getAssignments(
             @PathVariable("secNo") int secNo,
             Principal principal) {
 
+        // section must exist and belong to the logged-in instructor
         Section section = sectionRepository.findById(secNo).orElse(null);
 
-        if (section == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-
-        if (!section.getInstructorEmail().equals(principal.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        if (section == null || !section.getInstructorEmail().equals(principal.getName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid section no");
         }
 
         return section.getAssignments().stream().map(assignment ->
@@ -86,38 +87,41 @@ public class AssignmentController {
                         assignment.getDueDate().toString(),
                         assignment.getSection().getCourse().getCourseId(),
                         assignment.getSection().getSectionId(),
-                        assignment.getSection().getSectionNo()
+                        secNo
                 )).toList();
     }
 
-    //  create assignment
+    // create a new assignment for a section
     @PostMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public AssignmentDTO createAssignment(
             @Valid @RequestBody AssignmentDTO dto,
             Principal principal) {
 
-        Section s = sectionRepository.findById(dto.secNo()).orElse(null);
+        // section must exist and belong to the logged-in instructor
+        Section section = sectionRepository.findById(dto.secNo()).orElse(null);
 
-        if (s == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
-        }
-
-        if (!s.getInstructorEmail().equals(principal.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
-
-        Date dueDate = Date.valueOf(dto.dueDate());
-
-        if (dueDate.before(s.getTerm().getAddDate()) ||
-                dueDate.after(s.getTerm().getEndDate())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+        if (section == null || !section.getInstructorEmail().equals(principal.getName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid section no");
         }
 
         Assignment assignment = new Assignment();
+        assignment.setSection(section);
         assignment.setTitle(dto.title());
-        assignment.setDueDate(dueDate);
-        assignment.setSection(s);
+
+        try {
+            Date dueDate = Date.valueOf(dto.dueDate());
+
+            // due date must fall within the term dates
+            if (dueDate.before(section.getTerm().getStartDate()) ||
+                    dueDate.after(section.getTerm().getEndDate())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "due date out of range");
+            }
+
+            assignment.setDueDate(dueDate);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "due date invalid format");
+        }
 
         assignmentRepository.save(assignment);
 
@@ -131,38 +135,35 @@ public class AssignmentController {
         );
     }
 
-    //  update assignment
+    // update an existing assignment
     @PutMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public AssignmentDTO updateAssignment(
             @Valid @RequestBody AssignmentDTO dto,
             Principal principal) {
 
-        Assignment assignment = assignmentRepository.findByID(dto.id());
+        // assignment must exist and belong to the logged-in instructor
+        Assignment assignment = assignmentRepository.findById(dto.id()).orElse(null);
 
-        if (assignment == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        if (assignment == null ||
+                !assignment.getSection().getInstructorEmail().equals(principal.getName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid assignment id");
         }
 
-        Section s = assignment.getSection();
+        assignment.setTitle(dto.title());
 
-        if (!s.getInstructorEmail().equals(principal.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
-        }
+        try {
+            Date dueDate = Date.valueOf(dto.dueDate());
 
-        if (dto.title() != null) {
-            assignment.setTitle(dto.title());
-        }
-
-        if (dto.dueDate() != null) {
-            Date newDate = Date.valueOf(dto.dueDate());
-
-            if (!newDate.before(s.getTerm().getStartDate()) &&
-                    !newDate.after(s.getTerm().getEndDate())) {
-                assignment.setDueDate(newDate);
-            } else {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
+            // due date must fall within the term dates
+            if (dueDate.before(assignment.getSection().getTerm().getStartDate()) ||
+                    dueDate.after(assignment.getSection().getTerm().getEndDate())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "due date out of range");
             }
+
+            assignment.setDueDate(dueDate);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "due date invalid format");
         }
 
         assignmentRepository.save(assignment);
@@ -177,29 +178,25 @@ public class AssignmentController {
         );
     }
 
-    //  delete assignment
+    // delete an assignment
     @DeleteMapping("/assignments/{assignmentId}")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_INSTRUCTOR')")
     public void deleteAssignment(
             @PathVariable("assignmentId") int assignmentId,
             Principal principal) {
 
-        Assignment assignment = assignmentRepository.findByID(assignmentId);
+        // assignment must exist and belong to the logged-in instructor
+        Assignment assignment = assignmentRepository.findById(assignmentId).orElse(null);
 
-        if (assignment == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-
-        Section s = assignment.getSection();
-
-        if (!s.getInstructorEmail().equals(principal.getName())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        if (assignment == null ||
+                !assignment.getSection().getInstructorEmail().equals(principal.getName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid assignment id");
         }
 
         assignmentRepository.delete(assignment);
     }
 
-    //  student view
+    // get assignments and grades for the logged-in student
     @GetMapping("/assignments")
     @PreAuthorize("hasAuthority('SCOPE_ROLE_STUDENT')")
     public List<AssignmentStudentDTO> getStudentAssignments(
@@ -207,21 +204,15 @@ public class AssignmentController {
             @RequestParam("semester") String semester,
             Principal principal) {
 
-        User user = userRepository.findByEmail(principal.getName());
-
         List<Assignment> assignments =
                 assignmentRepository.findByStudentEmailAndYearAndSemester(
-                        user.getEmail(), year, semester);
+                        principal.getName(), year, semester);
 
         return assignments.stream().map(assignment -> {
-
-            Grade g =
-                    gradeRepository.findByStudentEmailAndAssignmentId(
-                            user.getEmail(),
-                            assignment.getAssignmentId()
-                    );
-
-            Integer score = (g != null) ? g.getScore() : null;
+            Grade grade = gradeRepository.findByStudentEmailAndAssignmentId(
+                    principal.getName(),
+                    assignment.getAssignmentId()
+            );
 
             return new AssignmentStudentDTO(
                     assignment.getAssignmentId(),
@@ -229,7 +220,7 @@ public class AssignmentController {
                     assignment.getDueDate(),
                     assignment.getSection().getCourse().getCourseId(),
                     assignment.getSection().getSectionId(),
-                    score
+                    (grade == null) ? null : grade.getScore()
             );
         }).toList();
     }

@@ -23,12 +23,16 @@ public class AssignmentControllerUnitTest {
 
     @Autowired
     private WebTestClient webClient;
+
     @MockitoBean
     private RegistrarServiceProxy registrarServiceProxy;
+
     @Autowired
     private AssignmentRepository assignmentRepository;
+
     @Autowired
     private SectionRepository sectionRepository;
+
     @Autowired
     private UserRepository userRepository;
 
@@ -43,7 +47,8 @@ public class AssignmentControllerUnitTest {
                 .accept(MediaType.APPLICATION_JSON)
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody(LoginDTO.class).returnResult();
+                .expectBody(LoginDTO.class)
+                .returnResult();
 
         String jwt = login_dto.getResponseBody().jwt();
         assertNotNull(jwt);
@@ -57,19 +62,21 @@ public class AssignmentControllerUnitTest {
                 1
         );
 
-        EntityExchangeResult<AssignmentDTO> AssignmentResponse = webClient.post().uri("/assignments")
+        EntityExchangeResult<AssignmentDTO> assignmentResponse = webClient.post().uri("/assignments")
                 .headers(headers -> headers.setBearerAuth(jwt))
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(assignmentDTO)
                 .accept(MediaType.APPLICATION_JSON)
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody(AssignmentDTO.class).returnResult();
+                .expectBody(AssignmentDTO.class)
+                .returnResult();
 
-        AssignmentDTO actualAssignment = AssignmentResponse.getResponseBody();
+        AssignmentDTO actualAssignment = assignmentResponse.getResponseBody();
+        assertNotNull(actualAssignment);
         assertTrue(actualAssignment.id() > 0);
 
-        Assignment assignment = assignmentRepository.findByID(actualAssignment.id());
+        Assignment assignment = assignmentRepository.findById(actualAssignment.id()).orElse(null);
         assertNotNull(assignment);
 
         // login as student
@@ -81,12 +88,13 @@ public class AssignmentControllerUnitTest {
                 .accept(MediaType.APPLICATION_JSON)
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody(LoginDTO.class).returnResult();
+                .expectBody(LoginDTO.class)
+                .returnResult();
 
         String studentJwt = studentLogin.getResponseBody().jwt();
         assertNotNull(studentJwt);
 
-        // student cannot create
+        // student cannot create assignment
         webClient.post().uri("/assignments")
                 .headers(headers -> headers.setBearerAuth(studentJwt))
                 .contentType(MediaType.APPLICATION_JSON)
@@ -95,7 +103,7 @@ public class AssignmentControllerUnitTest {
                 .exchange()
                 .expectStatus().is4xxClientError();
 
-        // student get assignments
+        // student can view assignments
         EntityExchangeResult<List<AssignmentStudentDTO>> assignmentDTOs = webClient.get()
                 .uri("/assignments?year=2025&semester=Fall")
                 .headers(headers -> headers.setBearerAuth(studentJwt))
@@ -119,7 +127,8 @@ public class AssignmentControllerUnitTest {
                 .accept(MediaType.APPLICATION_JSON)
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody(LoginDTO.class).returnResult();
+                .expectBody(LoginDTO.class)
+                .returnResult();
 
         String jwt = login_dto.getResponseBody().jwt();
         assertNotNull(jwt);
@@ -133,19 +142,21 @@ public class AssignmentControllerUnitTest {
                 1
         );
 
-        EntityExchangeResult<AssignmentDTO> AssignmentResponse = webClient.post().uri("/assignments")
+        EntityExchangeResult<AssignmentDTO> assignmentResponse = webClient.post().uri("/assignments")
                 .headers(headers -> headers.setBearerAuth(jwt))
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(assignmentDTO)
                 .accept(MediaType.APPLICATION_JSON)
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody(AssignmentDTO.class).returnResult();
+                .expectBody(AssignmentDTO.class)
+                .returnResult();
 
-        AssignmentDTO actualAssignment = AssignmentResponse.getResponseBody();
+        AssignmentDTO actualAssignment = assignmentResponse.getResponseBody();
+        assertNotNull(actualAssignment);
         assertTrue(actualAssignment.id() > 0);
 
-        Assignment assignment = assignmentRepository.findByID(actualAssignment.id());
+        Assignment assignment = assignmentRepository.findById(actualAssignment.id()).orElse(null);
         assertNotNull(assignment);
 
         AssignmentDTO updatedAssignmentDTO = new AssignmentDTO(
@@ -165,16 +176,16 @@ public class AssignmentControllerUnitTest {
                 .exchange()
                 .expectStatus().isOk();
 
-        Assignment testAssignment = assignmentRepository.findByID(actualAssignment.id());
+        Assignment testAssignment = assignmentRepository.findById(actualAssignment.id()).orElse(null);
+        assertNotNull(testAssignment);
         assertEquals("Updated Assignment", testAssignment.getTitle());
 
-        // FIXED DELETE
         webClient.delete().uri("/assignments/" + actualAssignment.id())
                 .headers(headers -> headers.setBearerAuth(jwt))
                 .exchange()
                 .expectStatus().isOk();
 
-        Assignment assignment2 = assignmentRepository.findByID(actualAssignment.id());
+        Assignment assignment2 = assignmentRepository.findById(actualAssignment.id()).orElse(null);
         assertNull(assignment2);
     }
 
@@ -189,13 +200,13 @@ public class AssignmentControllerUnitTest {
                 .accept(MediaType.APPLICATION_JSON)
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody(LoginDTO.class).returnResult();
+                .expectBody(LoginDTO.class)
+                .returnResult();
 
         String jwt = login_dto.getResponseBody().jwt();
         assertNotNull(jwt);
 
-        // FIXED TERM
-        EntityExchangeResult<List<SectionDTO>> Sections = webClient.get()
+        EntityExchangeResult<List<SectionDTO>> sections = webClient.get()
                 .uri("/sections?year=2026&semester=Spring")
                 .headers(headers -> headers.setBearerAuth(jwt))
                 .accept(MediaType.APPLICATION_JSON)
@@ -204,7 +215,8 @@ public class AssignmentControllerUnitTest {
                 .expectBodyList(SectionDTO.class)
                 .returnResult();
 
-        List<SectionDTO> actualSections = Sections.getResponseBody();
+        List<SectionDTO> actualSections = sections.getResponseBody();
+        assertNotNull(actualSections);
         assertTrue(actualSections.size() > 0);
 
         AssignmentDTO assignmentDTO = new AssignmentDTO(
@@ -223,7 +235,7 @@ public class AssignmentControllerUnitTest {
                 .exchange()
                 .expectStatus().isOk();
 
-        EntityExchangeResult<List<AssignmentDTO>> AssignmentsResponse = webClient.get()
+        EntityExchangeResult<List<AssignmentDTO>> assignmentsResponse = webClient.get()
                 .uri("/sections/1/assignments")
                 .headers(headers -> headers.setBearerAuth(jwt))
                 .accept(MediaType.APPLICATION_JSON)
@@ -232,7 +244,8 @@ public class AssignmentControllerUnitTest {
                 .expectBodyList(AssignmentDTO.class)
                 .returnResult();
 
-        List<AssignmentDTO> actualAssignments = AssignmentsResponse.getResponseBody();
+        List<AssignmentDTO> actualAssignments = assignmentsResponse.getResponseBody();
+        assertNotNull(actualAssignments);
         assertTrue(actualAssignments.size() > 0);
     }
 }
